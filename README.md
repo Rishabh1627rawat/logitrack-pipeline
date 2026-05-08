@@ -4,7 +4,7 @@
 > *Only 6% of logistics companies achieve full operational visibility.*
 > — State of Visibility Report, 2024
 
-This pipeline was built to solve exactly that.
+An end-to-end **ELT pipeline** that solves shipment visibility gaps and warehouse bottleneck detection using a modern data stack — Airflow, Azure ADLS Gen 2, Databricks, and Snowflake.
 
 ---
 
@@ -26,47 +26,60 @@ When a shipment is delayed, everyone blames someone else — carrier blames the 
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                     DATA SOURCES                            │
-│   Shipment Master    Scan Events     Hub Master             │
-│       (CSV)            (JSON)          (CSV)                │
+│              DATA GENERATION (Source Simulation)            │
+│   shippement_orders.py — Faker-based synthetic data         │
+│   Generates: shipments, scan events, hubs                   │
 └──────────────────────┬──────────────────────────────────────┘
                        │
                        ▼
 ┌─────────────────────────────────────────────────────────────┐
 │              APACHE AIRFLOW (Orchestration)                  │
-│   Daily Ingest DAG · Scan Events DAG · Bottleneck DAG       │
+│   Triggering.py — Single orchestrator DAG with 3 tasks     │
+│   ├─ BashOperator: Generate raw data                        │
+│   ├─ PythonOperator: Upload to ADLS                         │
+│   └─ DatabricksRunNowOperator: Trigger Silver job           │
 └──────────────────────┬──────────────────────────────────────┘
                        │
                        ▼
 ┌─────────────────────────────────────────────────────────────┐
-│           AZURE DATA LAKE STORAGE GEN 2                      │
-│                  Bronze Landing Zone                         │
-│  /bronze/shipment_master/year=YYYY/month=MM/day=DD/         │
-│  /bronze/scan_events/year=YYYY/month=MM/day=DD/             │
+│           AZURE DATA LAKE STORAGE GEN 2 (Bronze)             │
+│   Container: bronzeshippingdata                             │
+│   Path: bronze/{YYYY-MM-DD}/                                │
+│   Format: Raw CSV/JSON files (untouched)                    │
 └──────────────────────┬──────────────────────────────────────┘
                        │
                        ▼
 ┌─────────────────────────────────────────────────────────────┐
-│         DATABRICKS + PYSPARK (Transformation)               │
+│         DATABRICKS + PYSPARK (Silver Layer)                  │
+│   Notebook: Shipment_logistic.ipynb                         │
+│   - Schema enforcement & cleaning                           │
+│   - Deduplication                                           │
+│   - Dwell time calculation per hub                          │
+│   - Joins: shipments × scan_events × hubs                   │
+│   Output: Parquet files → ADLS silver/shippment_delays/     │
+└──────────────────────┬──────────────────────────────────────┘
+                       │
+                       ▼
+┌─────────────────────────────────────────────────────────────┐
+│              SNOWFLAKE (Warehouse + Gold Layer)              │
 │                                                             │
-│  Bronze → Silver → Gold  (Medallion Architecture)           │
-│                                                             │
-│  Bronze : Raw data landed as-is, schema enforced           │
-│  Silver : Cleaned, joined, dwell time calculated           │
-│  Gold   : Aggregations, bottleneck scores, dark periods    │
+│  ┌────────────────────────────────────────────────┐        │
+│  │ Storage Integration → External Stage           │        │
+│  │ COPY INTO → shipping_logistic_silver (wide)    │        │
+│  └────────────────────────────────────────────────┘        │
+│                       ↓                                     │
+│  Gold Layer — 6 SQL-based use cases:                       │
+│  • Dark Period Detection                                    │
+│  • SLA Breach Analysis                                      │
+│  • Hub-wise Total Delay                                     │
+│  • Worst Performing Routes                                  │
+│  • Worst Performing Carriers                                │
+│  • Worst Day Patterns per Hub                               │
 └──────────────────────┬──────────────────────────────────────┘
                        │
                        ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                    SNOWFLAKE                                 │
-│              Data Warehouse Layer                            │
-│  fact_shipments · fact_hub_performance · fact_daily_patterns│
-│  dim_hubs · dim_carriers · dim_date                         │
-└──────────────────────┬──────────────────────────────────────┘
-                       │
-                       ▼
-┌─────────────────────────────────────────────────────────────┐
-│                 STREAMLIT DASHBOARD                          │
+│                 STREAMLIT DASHBOARD (Planned)                │
 │  Dark periods · Hub bottleneck ranking · Carrier performance│
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -78,13 +91,33 @@ When a shipment is delayed, everyone blames someone else — carrier blames the 
 | Layer | Technology |
 |---|---|
 | Orchestration | Apache Airflow |
-| Storage | Azure Data Lake Storage Gen 2 |
-| Processing | Databricks, PySpark |
-| Table format | Delta Lake |
-| Warehouse | Snowflake |
-| Dashboard | Streamlit |
-| Data generation | Python, Faker, Geopy |
-| Language | Python 3.11 |
+| Source Simulation | Python, Faker, Geopy |
+| Lake Storage | Azure Data Lake Storage Gen 2 |
+| Silver Processing | Databricks, PySpark |
+| File Format (Silver→Gold) | Apache Parquet |
+| Warehouse | Snowflake (Storage Integration + External Stage) |
+| Gold Layer | Snowflake SQL |
+| Dashboard | Streamlit *(planned)* |
+| Language | Python 3.11, SQL |
+
+---
+
+## 🧠 Why ELT Instead of ETL? (Key Engineering Decision)
+
+Initially, the plan was to do all transformations in PySpark on Databricks and use Snowflake purely for storage. **I changed this approach during implementation.** Here's why:
+
+**Heavy lifting belongs in Databricks. Business logic belongs in SQL.**
+
+- **Bronze → Silver:** Complex joins, dwell-time calculation, scan-sequence ordering — these are **PySpark's strength**. Big data, complex transformations, parallelized.
+- **Silver → Gold:** Simple aggregations (`GROUP BY hub`, `AVG(delay)`, `COUNT(delayed)`) — these are **SQL's strength**. Auto-scaling Snowflake warehouses, result caching, analyst-friendly.
+
+**Benefits of this split:**
+1. **Cost** — Snowflake auto-suspends in 60s; Databricks cluster doesn't. ~10x cheaper for aggregations.
+2. **Maintainability** — Business logic changes (e.g., SLA threshold) take 2 minutes in SQL vs 30 min in PySpark.
+3. **Team alignment** — Analysts can read/modify Gold SQL directly without learning PySpark.
+4. **Right tool for right job** — Databricks for transformations, Snowflake for analytics.
+
+This is the **modern ELT pattern** used at Netflix, Airbnb, and most data-driven companies in 2024–2026.
 
 ---
 
@@ -102,7 +135,7 @@ Shipment SHP-001 journey:
 
 04:00 AM → Arrived   — Nagpur Hub       🚨 DARK PERIOD FLAGGED
 ```
-Pipeline detects gaps between consecutive scans beyond expected transit windows.
+`Dark_Period_detection.sql` flags gaps between consecutive scans beyond expected transit windows.
 
 ### 2. Warehouse Bottleneck Detection
 ```
@@ -112,7 +145,15 @@ Nagpur Sorting   16.0 hrs    2 hrs      14 hrs  1,246  ← #1
 Mumbai Gateway    4.2 hrs    3 hrs       1 hr     470
 Delhi Sorting     1.5 hrs    2 hrs       0 hrs      0  ← healthy
 ```
-Bottleneck Score = avg_delay_hrs × delayed_shipment_count
+`Total_Time_delay_at_each_hub.sql` ranks hubs by dwell-time delay.
+
+### 3. SLA Breach Analysis
+`Sla_Breech.sql` flags shipments that exceeded their distance-based SLA.
+
+### 4. Worst Carrier / Route / Day Patterns
+- `Worst_Carrier.sql` — carrier-wise delay scoring
+- `WorstRoute.sql` — origin-destination pair analysis
+- `Worst_Day_each_hub.sql` — day-of-week patterns per hub
 
 ---
 
@@ -121,38 +162,78 @@ Bottleneck Score = avg_delay_hrs × delayed_shipment_count
 ```
 logitrack-pipeline/
 │
-├── data_generator/
-│   ├── synthetic_data_generator.py   # Generates realistic shipment data
-│   └── hub_master.py                 # 17 Indian logistics hubs across 5 regions
+├── bronze/
+│   └── shippement_orders.py            # Faker-based data generator (source simulation)
 │
-├── dags/
-│   ├── ingest_dag.py                 # Daily shipment + scan event ingestion
-│   ├── bottleneck_dag.py             # Warehouse bottleneck detection trigger
-│   └── dark_period_dag.py            # Dark period detection trigger
+├── Dags/
+│   └── Triggering.py                   # Airflow orchestrator DAG
+│                                       # Tasks: generate → upload → trigger Databricks
 │
-├── notebooks/
-│   ├── bronze/
-│   │   └── bronze_ingestion.py       # Raw data landing + schema validation
-│   ├── silver/
-│   │   └── silver_transformation.py  # Dwell time calc + joins + dedup
-│   └── gold/
-│       ├── gold_daily_shipments.py   # Daily shipment counts
-│       ├── gold_hub_performance.py   # Hub bottleneck scores
-│       ├── gold_dark_periods.py      # Dark period detection
-│       └── gold_daily_patterns.py    # Day/time delay patterns
+├── silver/
+│   └── Shipment_logistic.ipynb         # Databricks PySpark notebook
+│                                       # Cleaning, dwell-time calc, joins
 │
-├── warehouse/
-│   └── snowflake_schema.sql          # Star schema DDL
+├── Gold/                               # Snowflake SQL — business use cases
+│   ├── Gold_Layer.sql                  # Main aggregation table
+│   ├── Dark_Period_detection.sql       # Dark period flagging
+│   ├── Sla_Breech.sql                  # SLA breach detection
+│   ├── Total_Time_delay_at_each_hub.sql # Hub bottleneck ranking
+│   ├── WorstRoute.sql                  # Route performance
+│   ├── Worst_Carrier.sql               # Carrier performance
+│   └── Worst_Day_each_hub.sql          # Day-pattern analysis
 │
-├── dashboard/
-│   └── app.py                        # Streamlit ops dashboard
+├── warehouse/                          # Snowflake setup (TO ADD)
+│   └── snowflake_setup.sql             # DDL: database, schema, integration, stage, table
 │
-├── docs/
-│   └── architecture.png
+├── dashboard/                          # Streamlit dashboard (TO BUILD)
+│   └── app.py
 │
-├── requirements.txt
+├── .gitignore
+├── LICENSE
+├── requirements.txt                    # TO ADD
 └── README.md
 ```
+
+---
+
+## ❄️ Snowflake Setup
+
+The Gold layer runs entirely in Snowflake using a **Storage Integration → External Stage → COPY INTO** pattern. This avoids credential hardcoding and uses Snowflake's native ADLS connector.
+
+### Setup Flow
+
+```sql
+-- 1. Database & Schema
+CREATE DATABASE shipping_logistic;
+CREATE SCHEMA shipping_logistic.shipping_gold_schema;
+
+-- 2. Storage Integration (secure Azure AD-based connection)
+CREATE STORAGE INTEGRATION azure_adls_silver
+  TYPE = EXTERNAL_STAGE
+  STORAGE_PROVIDER = 'AZURE'
+  AZURE_TENANT_ID = '<tenant-id>'
+  ENABLED = TRUE
+  STORAGE_ALLOWED_LOCATIONS = ('azure://shippingdata.blob.core.windows.net/silvershippingdata/silver/shippment_delays');
+
+-- 3. File Format
+CREATE FILE FORMAT shipping_gold_layer TYPE = PARQUET;
+
+-- 4. External Stage
+CREATE STAGE azure_silver_stage
+  URL = 'azure://shippingdata.blob.core.windows.net/silvershippingdata/silver/shippment_delays/'
+  STORAGE_INTEGRATION = azure_adls_silver
+  FILE_FORMAT = shipping_gold_layer;
+
+-- 5. Load Silver data into Snowflake
+COPY INTO shipping_logistic.shipping_gold_schema.shipping_logistic_silver
+FROM @azure_silver_stage
+PATTERN = '.*part-.*\.parquet'
+MATCH_BY_COLUMN_NAME = CASE_INSENSITIVE;
+
+-- 6. Run Gold layer SQL queries on this table
+```
+
+Full DDL is available in `warehouse/snowflake_setup.sql`.
 
 ---
 
@@ -192,7 +273,7 @@ SLA is calculated using `geopy` geodesic distance — not hardcoded.
 
 ---
 
-## 🧠 Key Engineering Decisions
+## 🧠 Other Engineering Decisions
 
 **Why medallion architecture?**
 Bronze keeps raw data untouched for reprocessing. Silver has clean, joined data. Gold has business-ready aggregations. Each layer has a clear purpose — debugging is easy.
@@ -203,51 +284,55 @@ Real logistics companies track parcels via barcode/RFID scans at hubs — not co
 **Why distance-based SLA instead of fixed SLA?**
 Delhi → Faridabad (25 km) and Delhi → Mumbai (1,145 km) cannot have the same SLA. Geopy calculates aerial distance which is multiplied by 1.3 for road distance approximation — matching real courier zone systems.
 
-**Why Snowflake over Azure Synapse?**
-Snowflake is multi-cloud and widely adopted across industries — skills transfer regardless of cloud provider. Better fit for a portfolio project targeting diverse employers.
+**Why Snowflake Storage Integration over hardcoded credentials?**
+Storage Integration uses Azure AD-based authentication — no SAS tokens or keys in code. This is the production-recommended way to connect Snowflake with Azure.
 
----
-
-## 📈 Gold Layer Calculations
-
-Gold layer builds insights in this exact order:
-
-```
-Step 1 → Daily total shipments per hub
-Step 2 → Daily delayed shipments + on-time count
-Step 3 → Daily average delay hours
-Step 4 → Hub-level dwell time vs expected dwell
-Step 5 → Bottleneck score, dark periods, carrier performance
-```
-
-Each step depends on the previous — skipping any step produces incorrect aggregations.
+**Why Parquet between Silver and Gold?**
+Columnar format, compressed, schema-aware. Snowflake's `COPY INTO` with `MATCH_BY_COLUMN_NAME` reads Parquet natively and handles schema evolution gracefully.
 
 ---
 
 ## 🚦 Project Status
 
-- [x] Synthetic data generator with distance-based SLA
-- [x] Hub master — 17 hubs across 5 regions (North/South/East/West/Central)
-- [ ] Airflow DAGs — in progress
-- [ ] Bronze layer ingestion notebook
-- [ ] Silver transformation — dwell time calculation
-- [ ] Gold aggregations — bottleneck + dark period detection
-- [ ] Snowflake star schema
+- [x] Synthetic data generator with distance-based SLA (Faker + Geopy)
+- [x] Hub master — 17 hubs across 5 regions
+- [x] Airflow DAG with 3 tasks (generate → upload → trigger Databricks)
+- [x] Bronze layer — raw landing in ADLS Gen 2
+- [x] Silver transformation — PySpark notebook with dwell time + joins
+- [x] Snowflake Storage Integration + External Stage setup
+- [x] Silver → Snowflake load via COPY INTO (Parquet)
+- [x] Gold layer — 6 SQL-based use case queries
+- [ ] Snowflake setup DDL committed to repo (`warehouse/snowflake_setup.sql`)
+- [ ] DAG extension to trigger Snowflake load + Gold queries
 - [ ] Streamlit dashboard
+- [ ] requirements.txt
+- [ ] CI/CD via GitHub Actions
 
 ---
 
 ## 🔮 Future Scope
 
-- Real-time streaming with Apache Kafka + Spark Streaming
-- ML-based SLA breach prediction replacing rule-based scoring
-- Integration with real carrier APIs (DHL Developer API)
-- Power BI dashboard for executive reporting
-- dbt models for Gold layer transformations
+- **Snowpipe** for auto-ingest (replace manual COPY INTO)
+- **MERGE-based incremental loads** to handle duplicates
+- **dbt** for Gold layer modeling, testing, and lineage
+- **Real-time streaming** with Apache Kafka + Spark Streaming
+- **ML-based SLA breach prediction** replacing rule-based scoring
+- **Integration with real carrier APIs** (DHL Developer API)
+- **Power BI dashboard** for executive reporting
+- **Data quality framework** (Great Expectations)
 
 ---
 
-## ⚙️ How to Run Data Generator
+## ⚙️ How to Run
+
+### Prerequisites
+- Python 3.11
+- Azure subscription with ADLS Gen 2
+- Databricks workspace
+- Snowflake account
+- Apache Airflow
+
+### Setup
 
 ```bash
 # Clone the repo
@@ -257,16 +342,21 @@ cd logitrack-pipeline
 # Install dependencies
 pip install -r requirements.txt
 
-# Generate synthetic data
-python data_generator/synthetic_data_generator.py
+# Generate synthetic data (manual run)
+python bronze/shippement_orders.py
 ```
 
-Output files in `data/raw/`:
-```
-shipment_master.csv          ← 500 shipments
-hub_master.csv               ← 17 hubs
-checkpoint_scan_events.json  ← ~3500 events
-```
+### Snowflake Setup
+Run `warehouse/snowflake_setup.sql` in your Snowflake worksheet to create:
+- Database, schema, table
+- Storage integration with Azure
+- External stage pointing to your ADLS silver path
+- Initial COPY INTO command
+
+### Airflow DAG
+Place `Dags/Triggering.py` in your Airflow `dags/` folder. Configure connections:
+- `adls_conn` — Azure Data Lake connection
+- `databricks_default` — Databricks connection
 
 ---
 
@@ -275,6 +365,7 @@ checkpoint_scan_events.json  ← ~3500 events
 - [State of Visibility 2024 — Tive](https://www.tive.com/blog/the-state-of-visibility-2024-report-a-sneak-peek)
 - [The Visibility Gap in Supply Chains — Transvirtual](https://www.transvirtual.com/us/blog/visibility-gap-in-supply-chains/)
 - [Real-Time Freight Visibility Challenges — Trinetix](https://www.trinetix.com/insights/real-time-freight-visibility)
+- [Snowflake Storage Integration with Azure](https://docs.snowflake.com/en/user-guide/data-load-azure-config)
 
 ---
 
