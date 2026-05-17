@@ -302,11 +302,22 @@ Columnar format, compressed, schema-aware. Snowflake's `COPY INTO` with `MATCH_B
 - [x] Snowflake Storage Integration + External Stage setup
 - [x] Silver → Snowflake load via COPY INTO (Parquet)
 - [x] Gold layer — 6 SQL-based use case queries
-- [ ] Snowflake setup DDL committed to repo (`warehouse/snowflake_setup.sql`)
-- [ ] DAG extension to trigger Snowflake load + Gold queries
-- [ ] Streamlit dashboard
-- [ ] requirements.txt
-- [ ] CI/CD via GitHub Actions
+- [x] DAG extension to trigger Snowflake load + Gold queries
+- [x] Power Bi Dashboard
+
+
+
+<img width="979" height="520" alt="Hub" src="https://github.com/user-attachments/assets/2a351768-9c0e-4c1f-aae0-03be334f15ff" />
+
+<img width="1012" height="509" alt="HUb 2" src="https://github.com/user-attachments/assets/6c516b66-60de-4ad7-9bbd-26431625b106" />
+
+<img width="980" height="518" alt="Hub 3" src="https://github.com/user-attachments/assets/4dc3de5c-71ad-4c21-ad55-9ae941553fce" />
+
+<img width="1000" height="499" alt="hub 4" src="https://github.com/user-attachments/assets/9c9c1d10-f1ff-4ae6-9e99-55b912e38415" />
+
+
+
+
 
 ---
 
