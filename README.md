@@ -318,29 +318,35 @@ Columnar format, compressed, schema-aware. Snowflake's `COPY INTO` with `MATCH_B
 
 <img width="979" height="520" alt="Hub" src="https://github.com/user-attachments/assets/2a351768-9c0e-4c1f-aae0-03be334f15ff" />
 
-![Bottleneck Score by Hub](your-image-link)
+[Bottleneck Score by Hub]
 *Hub bottleneck ranking — Gurgaon and Agra consistently show highest dwell times, flagged as worst-performing hubs*
+
+
 
 
 <img width="1012" height="509" alt="HUb 2" src="https://github.com/user-attachments/assets/6c516b66-60de-4ad7-9bbd-26431625b106" />
 
 
-![Dark Period by Hub](your-image-link)
+
+[Dark Period by Hub]
 *Dark period detection — percentage of shipments going silent beyond expected transit windows per hub*
 
 
- <img width="980" height="518" alt="Hub 3" src="https://github.com/user-attachments/assets/4dc3de5c-71ad-4c21-ad55-9ae941553fce" /> 
+
+<img width="980" height="518" alt="Hub 3" src="https://github.com/user-attachments/assets/4dc3de5c-71ad-4c21-ad55-9ae941553fce" /> 
 
 
-![Top 5 Worst Hubs by Day](your-image-link)
+
+[Top 5 Worst Hubs by Day]
 *Day-pattern analysis — identifies which days each hub performs worst, enabling targeted operational fixes*
  
 
+
+
 <img width="1000" height="499" alt="hub 4" src="https://github.com/user-attachments/assets/9c9c1d10-f1ff-4ae6-9e99-55b912e38415" />
 
-
-
-
+[SLA Performance]
+*SLA performance breakdown — 27.35% of shipments breached SLA, 72.57% delivered early, enabling carrier and route-level accountability*
 
 ---
 
