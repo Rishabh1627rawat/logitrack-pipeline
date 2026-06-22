@@ -295,14 +295,23 @@ Columnar format, compressed, schema-aware. Snowflake's `COPY INTO` with `MATCH_B
 ## 🚦 Project Status
 
 ✅ Synthetic data generator with distance-based SLA (Faker + Geopy)
+
 ✅ Hub master — 17 hubs across 5 regions
+
 ✅ Airflow DAG with 3 tasks (generate → upload → trigger Databricks)
+
 ✅ Bronze layer — raw landing in ADLS Gen 2
+
 ✅ Silver transformation — PySpark notebook with dwell time + joins
+
 ✅ Snowflake Storage Integration + External Stage setup
+
 ✅ Silver → Snowflake load via COPY INTO (Parquet)
+
 ✅ Gold layer — 6 SQL-based use case queries
+
 ✅ DAG extension to trigger Snowflake load + Gold queries
+
 ✅ Power BI Dashboard
 
 
