@@ -310,10 +310,17 @@ Columnar format, compressed, schema-aware. Snowflake's `COPY INTO` with `MATCH_B
 <img width="979" height="520" alt="Hub" src="https://github.com/user-attachments/assets/2a351768-9c0e-4c1f-aae0-03be334f15ff" />
 
 
+
+
 <img width="1012" height="509" alt="HUb 2" src="https://github.com/user-attachments/assets/6c516b66-60de-4ad7-9bbd-26431625b106" />
 
 
+
+
+
  <img width="980" height="518" alt="Hub 3" src="https://github.com/user-attachments/assets/4dc3de5c-71ad-4c21-ad55-9ae941553fce" /> 
+
+
 
  
 
